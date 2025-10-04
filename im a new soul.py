@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-import os, requests, json
+import os, requests, json, time
 from modules.db.supabase import SupaDB
 
 DISCORD_TOKEN = (
@@ -44,6 +44,9 @@ class ReviewView(discord.ui.View):
                 name="Reason", value=next_review.get("reason", ""), inline=False
             )
             embed.add_field(name="User Details", value=str(h), inline=False)
+            
+            embed.set_thumbnail(url=fetch_user_avatar(next_review.get("userid", "")))
+
 
             view = ReviewView(next_review, self.ctx)
             await self.ctx.send(embed=embed, view=view)
@@ -103,6 +106,29 @@ def fetch_user_details(userId):
         print(f"Error fetching user details for user ID {userId}: {e}")
         return None
 
+def fetch_user_avatar(userId):
+    try:
+        url = f"https://thumbnails.roproxy.com/v1/users/avatar-bust?userIds={userId}&size=352x352&format=Png&isCircular=false"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json().get("data", [])
+        if not data:
+            return None
+
+        item = data[0]
+        if item.get("state", "") == "Pending":
+            time.sleep(1.5)
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json().get("data", [])
+            if not data:
+                return None
+            item = data[0]
+
+        return item.get("imageUrl")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching avatar for user ID {userId}: {e}")
+        return None
 
 @bot.event
 async def on_ready():
@@ -130,6 +156,8 @@ async def reviews(ctx):
     embed.add_field(name="User ID", value=r.get("userid", ""), inline=True)
     embed.add_field(name="Reason", value=r.get("reason", ""), inline=False)
     embed.add_field(name="User Details", value=str(h), inline=False)
+
+    embed.set_thumbnail(url=fetch_user_avatar(r.get("userid", "")))
     view = ReviewView(r, ctx)
     await ctx.send(embed=embed, view=view)
 

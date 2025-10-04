@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import os, requests, json, time
 from modules.db.supabase import SupaDB
+import asyncio
 
 DISCORD_TOKEN = (
     "MTQyMzUzNjc4MTkxOTM5MTc1NA.GrImtq.qeu1yL10K0sDD9cGlf-7uNC8f799S4r-hvxL5U"
@@ -44,19 +45,15 @@ class ReviewView(discord.ui.View):
                 name="Reason", value=next_review.get("reason", ""), inline=False
             )
             embed.add_field(name="User Details", value=str(h), inline=False)
-            
             embed.set_thumbnail(url=fetch_user_avatar(next_review.get("userid", "")))
-
 
             view = ReviewView(next_review, self.ctx)
             await self.ctx.send(embed=embed, view=view)
         else:
             await self.ctx.send("No more reviews found.")
 
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
-    async def approve_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
+    async def _finalize(self, action: str, interaction: discord.Interaction):
+        # perform DB ops in background after acknowledging interaction
         reviewed_entry = {
             "username": self.review.get("username", ""),
             "userid": self.review.get("userid", ""),
@@ -68,33 +65,37 @@ class ReviewView(discord.ui.View):
             db.insert("reviewed", [reviewed_entry])
 
         db.delete("review", {"userid": self.review["userid"]})
+
+        # delete the message (ignore errors)
+        try:
+            await interaction.message.delete()
+        except Exception:
+            pass
+
+        # show next review
+        await self.show_next_review()
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
+    async def approve_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        # acknowledge interaction immediately
         await interaction.response.send_message(
             f"Approved review for user {self.review.get('username', '')} (ID: {self.review.get('userid', '')})",
             ephemeral=True,
         )
-        await interaction.message.delete()
-        await self.show_next_review()
+        # run DB/delete/show-next in background to avoid interaction expiry
+        asyncio.create_task(self._finalize("approve", interaction))
 
     @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
     async def reject_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        reviewed_entry = {
-            "username": self.review.get("username", ""),
-            "userid": self.review.get("userid", ""),
-            "reason": self.review.get("reason", ""),
-        }
-
-        exists = db.select("reviewed", {"userid": reviewed_entry["userid"]})
-        if not exists:
-            db.insert("reviewed", [reviewed_entry])
-        db.delete("review", {"userid": self.review["userid"]})
         await interaction.response.send_message(
             f"Rejected review for user {self.review.get('username', '')} (ID: {self.review.get('userid', '')})",
             ephemeral=True,
         )
-        await interaction.message.delete()
-        await self.show_next_review()
+        asyncio.create_task(self._finalize("reject", interaction))
 
 
 def fetch_user_details(userId):
@@ -130,10 +131,27 @@ def fetch_user_avatar(userId):
         print(f"Error fetching avatar for user ID {userId}: {e}")
         return None
 
+REVIEW_CHANNEL_ID = int(os.getenv("REVIEW_CHANNEL_ID")) if os.getenv("REVIEW_CHANNEL_ID") else None
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-
+    if REVIEW_CHANNEL_ID:
+        channel = bot.get_channel(REVIEW_CHANNEL_ID)
+        if channel:
+            reviews = db.select("review", {})
+            if reviews:
+                r = reviews[0]
+                userdecs = fetch_user_details(r.get("userid", ""))
+                h = userdecs.get("description", "No description available.") if userdecs else "No description available."
+                embed = discord.Embed(title="Review Pending", color=discord.Color.orange())
+                embed.add_field(name="Username", value=r.get("username", ""), inline=True)
+                embed.add_field(name="User ID", value=r.get("userid", ""), inline=True)
+                embed.add_field(name="Reason", value=r.get("reason", ""), inline=False)
+                embed.add_field(name="User Details", value=str(h), inline=False)
+                embed.set_thumbnail(url=fetch_user_avatar(r.get("userid", "")))
+                view = ReviewView(r, channel)
+                await channel.send(embed=embed, view=view)
 
 @bot.command()
 async def reviews(ctx):

@@ -1,16 +1,20 @@
 import discord
 from discord.ext import commands
+from dotenv import load_dotenv
 import os, requests, json, time, asyncio
 from modules.db.supabase import SupaDB
 from modules.crawl.crawl import crawl
 from modules.biocheck import BioCheck
 
+load_dotenv()
+
+
 DISCORD_TOKEN = (
-    "MTQyMzUzNjc4MTkxOTM5MTc1NA.GrImtq.qeu1yL10K0sDD9cGlf-7uNC8f799S4r-hvxL5U"
+    os.getenv("DISCORD_BOT_TOKEN")
 )
 
-SUPABASE_URL = "https://jcklxaqjnfryeoqyjqpq.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impja2x4YXFqbmZyeWVvcXlqcXBxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQwNTI4OSwiZXhwIjoyMDc0OTgxMjg5fQ.prkePQBRujRGHJvb830-2zIYE90JSg7gm_CT2qOPMOo"
+SUPABASE_URL = os.get("SUPBABASE_URL")
+SUPABASE_KEY = os.get("SUPBAASE_SERVICE_KEY")
 db = SupaDB(SUPABASE_URL, SUPABASE_KEY)
 
 cl = crawl()

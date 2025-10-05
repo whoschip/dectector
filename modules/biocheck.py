@@ -1,6 +1,8 @@
 import os
 from groq import Groq
 import json
+import time
+import logging
 
 
 class BioCheck:
@@ -10,7 +12,7 @@ class BioCheck:
             raise ValueError("GROQ_KEY environment variable not set.")
         self.client = Groq(api_key=self.api_key)
 
-    def check(self, bio, username):
+    def check(self, bio, username, retries: int = 3, backoff: float = 1.0):
         system_prompt = """
         you are an ai moderator. your job is to judge if a bio & username combo is appropriate, needs review, or inappropriate.  
 
@@ -38,68 +40,55 @@ class BioCheck:
 
         """
 
-        try:
-            response = self.client.chat.completions.create(
-                model="gemma2-9b-it",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": "Analyze this bio: CC7:    Op! Pt 10 (kbo) dpao h obnl kpjr (P zluk wyvvm), wslhzl vusf hkk tl pm fvb'yl h npys, huk ohz Kpzjvyk. Alea mpyza If hzrpun mvy kpzjvyk huk dolu fvb KT tl, wslhzl zahya dpao dpao h wpj vm fvby ivviz pm fvb dhua tl av zluk ihjr, zpujl P'cl nvaalu h sva vm ayvssz. Hszv P't puav yhjl wshf, zv WSLHZL jhss tl aol U-Dvyk., username: HungTEnY3arOldAAM",
-                    },
-                    {
-                        "role": "assistant",
-                        "content": '{\n        "username": "HungTEnY3arOldAAM",\n        "label": "inappropriate",\n  "reason": "This bio is encoded in caesar cipher endcode, which is a big redflag."\n}',
-                    },
-                    {
-                        "role": "user",
-                        "content": "Analyze this bio: blue: millia19\nIm a girl  username : Yamagishi_p3",
-                    },
-                    {
-                        "role": "assistant",
-                        "content": '{\n        "username": "Yamagishi_p3",\n        "label": "needs review",\n        "reason": "Bio mentions \'blue\' which is often used as a codeword  and potentially suggestive."\n} \n',
-                    },
-                    {
-                        "role": "user",
-                        "content": "Analyze this bio: i morph in studio 💔💔🫰\n\nim a loser ;-;;; username : 15yrdwllkitty",
-                    },
-                    {
-                        "role": "assistant",
-                        "content": '{\n        "username": "15yrdwllkitty",\n        "label": "inappropriate",\n        "reason": "The username includes a minor\'s age (\'15yr\') combined with \'kitty\' & \'studio\', which can be interpreted suggestively and raises concerns."\n} \n',
-                    },
-                    {
-                        "role": "user",
-                        "content": "Analyze this bio: blue:14 :D feminine boy I don't have a studio but you can message me for 💽! I'm pretty inexperienced and I'm on phone but I'm open to trying whatever :3 Im a girl username : robloxsxgamer",
-                    },
-                    {
-                        "role": "assistant",
-                        "content": '{\n        "username": "robloxsxgamer",\n        "label": "inappropriate",\n        "reason": "Mentions \'blue\', implies studio, shares personal contact info (\'message me\'), and discusses being open to trying \'whatever\' which raises concerns about potential NSFW or exploitative interactions."\n}',
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Analyze this bio: {bio}, username: {username}",
-                    },
-                ],
-                temperature=0.7,
-            )
-
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```") and content.endswith("```"):
-                content = content[3:-3].strip()
-
+        attempt = 0
+        while attempt < retries:
+            attempt += 1
             try:
-                return json.loads(content)
+                response = self.client.chat.completions.create(
+                    model="gemma2-9b-it",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": f"Analyze this bio: {bio}, username: {username}",
+                        },
+                    ],
+                    temperature=0.7,
+                )
+
+                content = response.choices[0].message.content.strip()
+                if content.startswith("```") and content.endswith("```"):
+                    content = content[3:-3].strip()
+
+                parsed = json.loads(content)
+                return {
+                    "username": parsed.get("username", username),
+                    "label": parsed.get("label", "error"),
+                    "reason": parsed.get("reason", ""),
+                    "raw_response": content,
+                }
+
             except json.JSONDecodeError as e:
+                logging.warning(
+                    "Invalid JSON from model (attempt %d/%d): %s",
+                    attempt,
+                    retries,
+                    e,
+                )
+                raw = locals().get("content", None)
+                if attempt < retries:
+                    time.sleep(backoff * attempt)
+                    continue
                 return {
                     "username": username,
                     "label": "error",
                     "reason": f"Invalid JSON from model: {e}",
-                    "raw_response": content,
+                    "raw_response": raw,
                 }
 
-        except Exception as e:
-            return {
-                "username": username,
-                "label": "error",
-                "reason": str(e),
-            }
+            except Exception as e:
+                logging.warning("Error calling model (attempt %d/%d): %s", attempt, retries, e)
+                if attempt < retries:
+                    time.sleep(backoff * attempt)
+                    continue
+                return {"username": username, "label": "error", "reason": str(e)}

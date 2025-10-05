@@ -1,7 +1,9 @@
 import discord
 from discord.ext import commands
-import os, requests, json, time
+import os, requests, json, time, asyncio
 from modules.db.supabase import SupaDB
+from modules.crawl.crawl import crawl
+from modules.biocheck import BioCheck
 
 DISCORD_TOKEN = (
     "MTQyMzUzNjc4MTkxOTM5MTc1NA.GrImtq.qeu1yL10K0sDD9cGlf-7uNC8f799S4r-hvxL5U"
@@ -10,6 +12,9 @@ DISCORD_TOKEN = (
 SUPABASE_URL = "https://jcklxaqjnfryeoqyjqpq.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impja2x4YXFqbmZyeWVvcXlqcXBxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQwNTI4OSwiZXhwIjoyMDc0OTgxMjg5fQ.prkePQBRujRGHJvb830-2zIYE90JSg7gm_CT2qOPMOo"
 db = SupaDB(SUPABASE_URL, SUPABASE_KEY)
+
+cl = crawl()
+ch = BioCheck()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -161,6 +166,43 @@ async def reviews(ctx):
     view = ReviewView(r, ctx)
     await ctx.send(embed=embed, view=view)
 
+@bot.command()
+async def queue(ctx, usr):
+    print(f"Queueing user {usr} for review...")
+    message = await ctx.send(f"Queueing user {usr} for review...")
+
+    details = await asyncio.to_thread(fetch_user_details, usr)
+    if details is None:
+        await message.edit(content=f"Failed to fetch details for user {usr}.")
+        return
+
+    if isinstance(details, dict):
+        username = details.get("name") or details.get("displayName") or details.get("username") or str(usr)
+        bio = details.get("description", "") or ""
+    else:
+        try:
+            parsed = json.loads(details)
+            username = parsed.get("name") or parsed.get("displayName") or parsed.get("username") or str(usr)
+            bio = parsed.get("description", "") or ""
+        except Exception:
+            username = str(usr)
+            bio = ""
+
+    ai_res = await asyncio.to_thread(ch.check, bio, username)
+    reason = ai_res.get("reason", "") if isinstance(ai_res, dict) else ""
+
+    try:
+        userid_int = int(usr)
+    except Exception:
+        userid_int = usr
+
+    review_row = {"username": username, "userid": userid_int, "reason": reason}
+    exists = db.select("review", {"userid": userid_int})
+    if not exists:
+        db.insert("review", [review_row])
+        await message.edit(content=f"User {usr} queued for review.")
+    else:
+        await message.edit(content=f"User {usr} is already queued for review.")
 
 
 if __name__ == "__main__":

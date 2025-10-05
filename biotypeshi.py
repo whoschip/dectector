@@ -13,7 +13,7 @@ load_dotenv()
 
 db = SupaDB(
     os.getenv("SUPBABASE_URL"),
-    os.getenv("SUPBAASE_SERVICE_KEY"),
+    os.getenv("SUPBASE_SERVICE_KEY"),
 )
 
 logging.basicConfig(

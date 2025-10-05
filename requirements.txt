@@ -1,0 +1,5 @@
+discord
+requests
+python-dotenv
+asyncio
+supabase

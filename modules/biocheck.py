@@ -7,7 +7,7 @@ class BioCheck:
     def __init__(self):
         self.api_key = os.getenv("GROQ_KEY")
         if not self.api_key:
-            raise ValueError("GROQ_API_KEY environment variable not set.")
+            raise ValueError("GROQ_KEY environment variable not set.")
         self.client = Groq(api_key=self.api_key)
 
     def check(self, bio, username):

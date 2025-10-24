@@ -5,7 +5,6 @@ import json
 import logging  # Import the logging module
 
 
-# Set up logging (you might want to make this configurable by the user of the module)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
